@@ -584,6 +584,32 @@ class TestFrameLocals(unittest.TestCase):
             f_locals.update(f_locals)
         f()
 
+    def test_update_error_from_keys_is_propagated(self):
+        # update() and |= must not mask an error raised by keys() while
+        class BadKeys(dict):
+            def keys(self):
+                raise RuntimeError('boom')
+
+        proxy = sys._getframe().f_locals
+        with self.assertRaises(RuntimeError):
+            proxy.update(BadKeys())
+        with self.assertRaises(RuntimeError):
+            proxy |= BadKeys()
+
+    def test_update_error_from_getitem_is_propagated(self):
+        # update() and |= must not mask an error raised by __getitem__ while
+        class BadGetItem(dict):
+            def keys(self):
+                return ['x']
+            def __getitem__(self, key):
+                raise RuntimeError('boom')
+
+        proxy = sys._getframe().f_locals
+        with self.assertRaises(RuntimeError):
+            proxy.update(BadGetItem())
+        with self.assertRaises(RuntimeError):
+            proxy |= BadGetItem()
+
     def test_repr(self):
         x = 1
         # Introduce a reference cycle

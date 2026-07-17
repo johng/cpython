@@ -326,7 +326,7 @@ static int
 framelocalsproxy_merge(PyObject* self, PyObject* other)
 {
     if (!PyDict_Check(other) && !PyFrameLocalsProxy_Check(other)) {
-        return -1;
+        return -2;
     }
 
     PyObject *keys = PyMapping_Keys(other);
@@ -569,12 +569,12 @@ framelocalsproxy_or(PyObject *self, PyObject *other)
 static PyObject*
 framelocalsproxy_inplace_or(PyObject *self, PyObject *other)
 {
-    if (!PyDict_Check(other) && !PyFrameLocalsProxy_Check(other)) {
+    int result = framelocalsproxy_merge(self, other);
+    if (result == -2) {
         Py_RETURN_NOTIMPLEMENTED;
     }
-
-    if (framelocalsproxy_merge(self, other) < 0) {
-        Py_RETURN_NOTIMPLEMENTED;
+    if (result < 0) {  // -1: real error, exception already set
+        return NULL;
     }
 
     return Py_NewRef(self);
@@ -721,8 +721,12 @@ static PyObject* framelocalsproxy___contains__(PyObject *self, PyObject *key)
 static PyObject*
 framelocalsproxy_update(PyObject *self, PyObject *other)
 {
-    if (framelocalsproxy_merge(self, other) < 0) {
+    int result = framelocalsproxy_merge(self, other);
+    if (result == -2) {
         PyErr_SetString(PyExc_TypeError, "update() argument must be dict or another FrameLocalsProxy");
+        return NULL;
+    }
+    if (result < 0) {  // -1: real error, exception already set
         return NULL;
     }
 
