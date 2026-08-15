@@ -1,0 +1,254 @@
+
+==================== BUILD configurable spin v2 (reload knob) -> cfg2 ====================
+patched OK
+diff --git a/Include/internal/pycore_lock.h b/Include/internal/pycore_lock.h
+index e31d8b4..03f41d5 100644
+--- a/Include/internal/pycore_lock.h
++++ b/Include/internal/pycore_lock.h
+@@ -73,6 +73,18 @@ extern int _PyMutex_TryUnlock(PyMutex *m);
+ // Yield the processor to other threads (e.g., sched_yield).
+ extern void _Py_yield(void);
+ 
++static inline void
++_Py_cpu_relax(void)
++{
++#if defined(__x86_64__) || defined(__i386__)
++    __asm__ volatile ("pause" ::: "memory");
++#elif defined(__aarch64__) || (defined(__arm__) && __ARM_ARCH >= 7)
++    __asm__ volatile ("yield" ::: "memory");
++#else
++    __asm__ volatile ("" ::: "memory");
++#endif
++}
++
+ 
+ // PyEvent is a one-time event notification
+ typedef struct {
+diff --git a/Python/lock.c b/Python/lock.c
+index ad97bfd..5e3efa2 100644
+--- a/Python/lock.c
++++ b/Python/lock.c
+@@ -31,6 +31,26 @@ static const int MAX_SPIN_COUNT = 40;
+ static const int MAX_SPIN_COUNT = 0;
+ #endif
+ 
++// Experimental runtime-configurable spin (env vars, read once at load).
++//   PY_PAUSE_SPINS = leading CPU-pause iterations (0 = pure yield)
++//   PY_ADDITIVE    = 1: add pause iters on top of the yield budget
++//   PY_BACKOFF_CAP = max pauses per iteration (exponential up to this)
++//   PY_RELOAD_MASK = reload v when ((spin_count+tid) & mask)==0; -1 = never
++static int g_pause_spins = 0;
++static int g_additive = 0;
++static int g_backoff_cap = 64;
++static int g_reload_mask = 0;
++__attribute__((constructor))
++static void
++init_spin_cfg(void)
++{
++    const char *s;
++    if ((s = getenv("PY_PAUSE_SPINS")) != NULL) g_pause_spins = atoi(s);
++    if ((s = getenv("PY_ADDITIVE")) != NULL)    g_additive = atoi(s);
++    if ((s = getenv("PY_BACKOFF_CAP")) != NULL) g_backoff_cap = atoi(s);
++    if ((s = getenv("PY_RELOAD_MASK")) != NULL) g_reload_mask = atoi(s);
++}
++
+ struct mutex_entry {
+     // The time after which the unlocking thread should hand off lock ownership
+     // directly to the waiting thread. Written by the waiting thread.
+@@ -79,6 +99,13 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
+     };
+ 
+     Py_ssize_t spin_count = 0;
++    int backoff = 1;
++    const int pause_spins = g_pause_spins;
++    const int backoff_cap = g_backoff_cap;
++    const int reload_mask = g_reload_mask;
++    // per-thread offset (stack address) to de-phase reloads across threads
++    const Py_ssize_t tid = (Py_ssize_t)((uintptr_t)&entry >> 8);
++    const Py_ssize_t total_spins = MAX_SPIN_COUNT + (g_additive ? pause_spins : 0);
+     for (;;) {
+         if ((v & _Py_LOCKED) == 0) {
+             // The lock is unlocked. Try to grab it.
+@@ -88,10 +115,22 @@ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
+             continue;
+         }
+ 
+-        if (!(v & _Py_HAS_PARKED) && spin_count < MAX_SPIN_COUNT) {
+-            // Spin for a bit.
+-            _Py_yield();
++        if (!(v & _Py_HAS_PARKED) && spin_count < total_spins) {
++            if (spin_count < pause_spins) {
++                for (int i = 0; i < backoff; i++) {
++                    _Py_cpu_relax();
++                }
++                if (backoff < backoff_cap) {
++                    backoff <<= 1;
++                }
++            }
++            else {
++                _Py_yield();
++            }
+             spin_count++;
++            if (reload_mask >= 0 && ((spin_count + tid) & reload_mask) == 0) {
++                v = _Py_atomic_load_uint8_relaxed(&m->_bits);
++            }
+             continue;
+         }
+ 
+cfg2 3.15.0a5+ gil= False
+
+==================== RUN base (separate binary, reference) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2050,9.754,0.2047,0.2083,0.000
+2,0.2565,7.796,0.2540,0.2632,0.006
+3,0.3261,6.133,0.3178,0.3321,0.014
+4,0.3699,5.406,0.3616,0.3905,0.016
+5,0.4663,4.289,0.4435,0.4820,0.025
+6,0.5474,3.653,0.5375,0.5897,0.032
+8,0.9235,2.166,0.9073,0.9340,0.084
+10,0.7821,2.557,0.7732,0.8092,0.058
+12,0.7599,2.632,0.7439,0.7702,0.052
+16,0.6883,2.906,0.6788,0.6912,0.046
+
+==================== RUN rN_p0 (PY_RELOAD_MASK=-1 PY_PAUSE_SPINS=0) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2001,9.996,0.1992,0.2032,0.000
+2,0.2483,8.055,0.2469,0.2525,0.004
+3,0.3051,6.556,0.3033,0.3110,0.012
+4,0.3622,5.522,0.3553,0.3634,0.022
+5,0.4619,4.330,0.4563,0.4636,0.023
+6,0.5587,3.580,0.5424,0.5769,0.028
+8,0.8510,2.350,0.8383,0.8700,0.069
+10,0.7408,2.700,0.7254,0.7535,0.048
+12,0.7083,2.824,0.7063,0.7322,0.043
+16,0.6389,3.130,0.6307,0.6505,0.035
+
+==================== RUN r3_p0 (PY_RELOAD_MASK=3 PY_PAUSE_SPINS=0) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2049,9.759,0.2028,0.2056,0.000
+2,0.2519,7.940,0.2514,0.2540,0.003
+3,0.3181,6.288,0.3136,0.3188,0.013
+4,0.3835,5.216,0.3745,0.3917,0.028
+5,0.4667,4.285,0.4259,0.4797,0.029
+6,0.5390,3.711,0.5361,0.5608,0.037
+8,1.1484,1.742,1.0956,1.1969,0.134
+10,1.0900,1.835,1.0861,1.1012,0.137
+12,1.0612,1.885,1.0449,1.0760,0.141
+16,1.2412,1.611,1.2245,1.2706,0.222
+
+==================== RUN r0_p0 (PY_RELOAD_MASK=0 PY_PAUSE_SPINS=0) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2080,9.614,0.2067,0.2086,0.000
+2,0.2878,6.950,0.2822,0.3004,0.002
+3,0.4260,4.695,0.4142,0.4350,0.016
+4,0.5904,3.387,0.5152,0.5947,0.035
+5,0.6187,3.233,0.6062,0.6199,0.039
+6,0.7320,2.732,0.7094,0.7421,0.048
+8,1.6913,1.183,1.6140,1.7070,0.169
+10,1.4727,1.358,1.4482,1.4998,0.165
+12,1.4032,1.425,1.3853,1.4188,0.160
+16,1.3643,1.466,1.3509,1.3961,0.197
+
+==================== RUN rN_p2 (PY_RELOAD_MASK=-1 PY_PAUSE_SPINS=2) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.1981,10.095,0.1978,0.1983,0.000
+2,0.2458,8.135,0.2436,0.2504,0.005
+3,0.3050,6.558,0.3023,0.3087,0.012
+4,0.3645,5.487,0.3621,0.3685,0.017
+5,0.4668,4.284,0.4536,0.4691,0.024
+6,0.5467,3.659,0.5351,0.5526,0.031
+8,0.9032,2.214,0.8886,0.9059,0.079
+10,0.7650,2.615,0.7612,0.7852,0.055
+12,0.7297,2.741,0.7151,0.7365,0.045
+16,0.6589,3.035,0.6507,0.6780,0.040
+
+==================== RUN rN_p4a (PY_RELOAD_MASK=-1 PY_PAUSE_SPINS=4 PY_ADDITIVE=1) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2070,9.661,0.2041,0.2074,0.000
+2,0.2464,8.118,0.2444,0.2491,0.005
+3,0.3041,6.576,0.2983,0.3062,0.012
+4,0.3576,5.592,0.3547,0.3616,0.016
+5,0.4488,4.457,0.4429,0.4614,0.023
+6,0.5704,3.506,0.5594,0.5730,0.029
+8,0.8716,2.294,0.8638,0.8783,0.073
+10,0.7607,2.629,0.7444,0.7654,0.051
+12,0.7195,2.780,0.7151,0.7288,0.046
+16,0.6485,3.084,0.6352,0.6529,0.036
+
+==================== RUN rN_pp (PY_RELOAD_MASK=-1 PY_PAUSE_SPINS=40) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2056,9.728,0.2052,0.2063,0.000
+2,0.2583,7.744,0.2543,0.2629,0.006
+3,0.3392,5.896,0.3351,0.3475,0.017
+4,0.4175,4.790,0.4136,0.4183,0.025
+5,0.5230,3.824,0.5132,0.5315,0.036
+6,0.6756,2.960,0.6655,0.6791,0.055
+8,1.1742,1.703,1.1421,1.1845,0.164
+10,1.2723,1.572,1.2469,1.2834,0.204
+12,1.4977,1.335,1.4601,1.4992,0.288
+16,2.5432,0.786,2.5119,2.5513,0.671
+
+==================== RUN r3_p4a (PY_RELOAD_MASK=3 PY_PAUSE_SPINS=4 PY_ADDITIVE=1) ====================
+# python=3.15.0a5+ gil=False total=2000000 reps=9
+threads,median_s,mops,p25_s,p75_s,vcsw_per_op
+1,0.2000,10.000,0.1992,0.2023,0.000
+2,0.2509,7.972,0.2488,0.2624,0.003
+3,0.3224,6.204,0.3181,0.3260,0.013
+4,0.4019,4.976,0.3802,0.4106,0.027
+5,0.4794,4.172,0.4573,0.4927,0.030
+6,0.5773,3.465,0.5623,0.5925,0.039
+8,1.1062,1.808,1.0666,1.1822,0.133
+10,1.0866,1.841,1.0620,1.1252,0.141
+12,1.0451,1.914,1.0419,1.0800,0.142
+16,1.2372,1.617,1.2079,1.2748,0.226
+
+==================== SWEEP COMPARISON (ref = rN_p0 = in-binary never-reload pure-yield == base) ====================
+=== Mops/s (higher=better) ===
+thr      base     rN_p0     r3_p0     r0_p0     rN_p2    rN_p4a     rN_pp    r3_p4a
+  1     9.754     9.996     9.759     9.614    10.095     9.661     9.728    10.000
+  2     7.796     8.055     7.940     6.950     8.135     8.118     7.744     7.972
+  3     6.133     6.556     6.288     4.695     6.558     6.576     5.896     6.204
+  4     5.406     5.522     5.216     3.387     5.487     5.592     4.790     4.976
+  5     4.289     4.330     4.285     3.233     4.284     4.457     3.824     4.172
+  6     3.653     3.580     3.711     2.732     3.659     3.506     2.960     3.465
+  8     2.166     2.350     1.742     1.183     2.214     2.294     1.703     1.808
+ 10     2.557     2.700     1.835     1.358     2.615     2.629     1.572     1.841
+ 12     2.632     2.824     1.885     1.425     2.741     2.780     1.335     1.914
+ 16     2.906     3.130     1.611     1.466     3.035     3.084     0.786     1.617
+
+=== % vs rN_p0 ===
+thr      base     rN_p0     r3_p0     r0_p0     rN_p2    rN_p4a     rN_pp    r3_p4a
+  1     -2.4%     +0.0%     -2.4%     -3.8%     +1.0%     -3.4%     -2.7%     +0.0%
+  2     -3.2%     +0.0%     -1.4%    -13.7%     +1.0%     +0.8%     -3.9%     -1.0%
+  3     -6.5%     +0.0%     -4.1%    -28.4%     +0.0%     +0.3%    -10.1%     -5.4%
+  4     -2.1%     +0.0%     -5.5%    -38.7%     -0.6%     +1.3%    -13.3%     -9.9%
+  5     -0.9%     +0.0%     -1.0%    -25.3%     -1.1%     +2.9%    -11.7%     -3.6%
+  6     +2.0%     +0.0%     +3.7%    -23.7%     +2.2%     -2.1%    -17.3%     -3.2%
+  8     -7.8%     +0.0%    -25.9%    -49.7%     -5.8%     -2.4%    -27.5%    -23.1%
+ 10     -5.3%     +0.0%    -32.0%    -49.7%     -3.1%     -2.6%    -41.8%    -31.8%
+ 12     -6.8%     +0.0%    -33.3%    -49.5%     -2.9%     -1.6%    -52.7%    -32.2%
+ 16     -7.2%     +0.0%    -48.5%    -53.2%     -3.0%     -1.5%    -74.9%    -48.3%
+
+=== parks/op ===
+thr      base     rN_p0     r3_p0     r0_p0     rN_p2    rN_p4a     rN_pp    r3_p4a
+  1     0.000     0.000     0.000     0.000     0.000     0.000     0.000     0.000
+  2     0.006     0.004     0.003     0.002     0.005     0.005     0.006     0.003
+  3     0.014     0.012     0.013     0.016     0.012     0.012     0.017     0.013
+  4     0.016     0.022     0.028     0.035     0.017     0.016     0.025     0.027
+  5     0.025     0.023     0.029     0.039     0.024     0.023     0.036     0.030
+  6     0.032     0.028     0.037     0.048     0.031     0.029     0.055     0.039
+  8     0.084     0.069     0.134     0.169     0.079     0.073     0.164     0.133
+ 10     0.058     0.048     0.137     0.165     0.055     0.051     0.204     0.141
+ 12     0.052     0.043     0.141     0.160     0.045     0.046     0.288     0.142
+ 16     0.046     0.035     0.222     0.197     0.040     0.036     0.671     0.226
+
+==================== DONE ====================
+
+[exited with code 0]

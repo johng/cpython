@@ -1,0 +1,90 @@
+Variant 1: restrict PR #144587's PAUSE swap to Linux/x86 only.
+Branch: yield-linux-only (1 commit on main). Verdict: still regresses contended
+FT locks (see FINDINGS.md §2); scoping fix only, not a real fix.
+
+diff --git a/Include/internal/pycore_lock.h b/Include/internal/pycore_lock.h
+index 7dd2419ecec..03aad1d8cd1 100644
+--- a/Include/internal/pycore_lock.h
++++ b/Include/internal/pycore_lock.h
+@@ -75,8 +75,21 @@ PyMutex_LockFlags(PyMutex *m, _PyLockFlags flags)
+ // error messages) otherwise returns 0.
+ extern int _PyMutex_TryUnlock(PyMutex *m);
+
+-// Yield the processor to other threads (e.g., sched_yield).
++// Yield the processor while spinning in a lock's spin-wait loop.
++//
++// On Linux/x86, sched_yield() is a real syscall (~hundreds of ns), so we
++// instead emit the lightweight PAUSE spin-wait hint (measured ~3-19ns, vs
++// ~250-650ns for sched_yield()). Every other platform keeps the out-of-line
++// OS scheduler yield (SwitchToThread / sched_yield) defined in Python/lock.c:
++// on Darwin sched_yield() is a cheap fast-trap that measured faster than a
++// bare pause and additionally hands the core to the lock holder, and no other
++// arch's pause hint has been benchmarked in this loop yet.
++#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
++#  define _Py_YIELD_INLINE 1
++static inline void _Py_yield(void) { __asm__ volatile ("pause" ::: "memory"); }
++#else
+ extern void _Py_yield(void);
++#endif
+
+
+ // PyEvent is a one-time event notification
+diff --git a/Misc/NEWS.d/next/Core_and_Builtins/2026-08-15-10-05-00.gh-issue-144586.Lnx86Y.rst b/Misc/NEWS.d/next/Core_and_Builtins/2026-08-15-10-05-00.gh-issue-144586.Lnx86Y.rst
+new file mode 100644
+index 00000000000..0ed114c978d
+--- /dev/null
++++ b/Misc/NEWS.d/next/Core_and_Builtins/2026-08-15-10-05-00.gh-issue-144586.Lnx86Y.rst
+@@ -0,0 +1,4 @@
++On Linux/x86, ``_Py_yield()`` now emits the lightweight ``PAUSE`` spin-wait
++hint inside a lock's spin-wait loop instead of calling the
++:manpage:`sched_yield(2)` syscall. Other platforms keep the OS scheduler
++yield. Patch by Donghee Na.
+diff --git a/Python/lock.c b/Python/lock.c
+index b636b91e796..24f14e6de25 100644
+--- a/Python/lock.c
++++ b/Python/lock.c
+@@ -8,13 +8,15 @@
+ #include "pycore_time.h"          // _PyTime_Add()
+ #include "pycore_stats.h"         // FT_STAT_MUTEX_SLEEP_INC()
+
+-#ifdef MS_WINDOWS
+-#  ifndef WIN32_LEAN_AND_MEAN
+-#    define WIN32_LEAN_AND_MEAN
++#ifndef _Py_YIELD_INLINE
++#  ifdef MS_WINDOWS
++#    ifndef WIN32_LEAN_AND_MEAN
++#      define WIN32_LEAN_AND_MEAN
++#    endif
++#    include <windows.h>          // SwitchToThread()
++#  elif defined(HAVE_SCHED_H)
++#    include <sched.h>            // sched_yield()
+ #  endif
+-#  include <windows.h>            // SwitchToThread()
+-#elif defined(HAVE_SCHED_H)
+-#  include <sched.h>              // sched_yield()
+ #endif
+
+ // If a thread waits on a lock for longer than TIME_TO_BE_FAIR_NS (1 ms), then
+@@ -42,15 +44,19 @@ struct mutex_entry {
+     int handed_off;
+ };
+
++#ifndef _Py_YIELD_INLINE
++// Non-Linux fallback: yield to the OS scheduler. See pycore_lock.h for why the
++// lightweight-pause path is Linux-only.
+ void
+ _Py_yield(void)
+ {
+-#ifdef MS_WINDOWS
++#  ifdef MS_WINDOWS
+     SwitchToThread();
+-#elif defined(HAVE_SCHED_H)
++#  elif defined(HAVE_SCHED_H)
+     sched_yield();
+-#endif
++#  endif
+ }
++#endif // !_Py_YIELD_INLINE
+
+ PyLockStatus
+ _PyMutex_LockTimed(PyMutex *m, PyTime_t timeout, _PyLockFlags flags)
