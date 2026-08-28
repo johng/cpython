@@ -1430,7 +1430,7 @@ dummy_func(
          * this frame, and the shim's EXIT_SETITEM discards that value and pops
          * the shim without pushing anything, leaving the net effect at -3.
          */
-        tier1 op(_STORE_SUBSCR_CHECK_FUNC, (v, container, sub -- v, container, sub, setitem)) {
+        tier1 op(_STORE_SUBSCR_PY_DUNDER_FRAME, (v, container, sub -- new_frame)) {
             PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(container));
             DEOPT_IF(!PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE));
             PyHeapTypeObject *ht = (PyHeapTypeObject *)tp;
@@ -1443,23 +1443,21 @@ dummy_func(
             assert(fcode->co_argcount == 3);
             DEOPT_IF(!_PyThreadState_HasStackSpace(
                 tstate, fcode->co_framesize + _Py_SetItemCleanup.co_framesize));
-            setitem = PyStackRef_FromPyObjectNew(setitem_o);
-        }
-
-        tier1 op(_STORE_SUBSCR_INIT_CALL, (v, container, sub, setitem -- new_frame)) {
             STAT_INC(STORE_SUBSCR, hit);
+            /* `setitem` is deliberately kept in a C local rather than pushed as
+             * a stack output: STORE_SUBSCR already occupies three stack slots,
+             * and one more would exceed the frame's co_stacksize. */
             _PyInterpreterFrame *shim = _PyFrame_PushTrampolineUnchecked(
                 tstate, (PyCodeObject *)&_Py_SetItemCleanup, 0, frame);
             assert(_PyFrame_GetBytecode(shim)[0].op.code == EXIT_SETITEM);
             _PyInterpreterFrame *pushed_frame = _PyFrame_PushUnchecked(
-                tstate, setitem, 3, shim);
+                tstate, PyStackRef_FromPyObjectNew(setitem_o), 3, shim);
             pushed_frame->localsplus[0] = container;
             pushed_frame->localsplus[1] = sub;
             pushed_frame->localsplus[2] = v;
             DEAD(container);
             DEAD(sub);
             DEAD(v);
-            DEAD(setitem);
             SYNC_SP();
             frame->return_offset = INSTRUCTION_SIZE;
             /* Account for pushing the extra shim frame.
@@ -1472,8 +1470,7 @@ dummy_func(
         macro(STORE_SUBSCR_PY_DUNDER) =
             unused/1 +
             _CHECK_PEP_523 +
-            _STORE_SUBSCR_CHECK_FUNC +
-            _STORE_SUBSCR_INIT_CALL +
+            _STORE_SUBSCR_PY_DUNDER_FRAME +
             _PUSH_FRAME;
 
         /* Only ever executed as the sole instruction of the _Py_SetItemCleanup

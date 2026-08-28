@@ -12876,9 +12876,8 @@
             next_instr += 2;
             INSTRUCTION_STATS(STORE_SUBSCR_PY_DUNDER);
             static_assert(INLINE_CACHE_ENTRIES_STORE_SUBSCR == 1, "incorrect cache size");
-            _PyStackRef container;
-            _PyStackRef setitem;
             _PyStackRef v;
+            _PyStackRef container;
             _PyStackRef sub;
             _PyStackRef new_frame;
             /* Skip 1 cache entry */
@@ -12890,9 +12889,11 @@
                     JUMP_TO_PREDICTED(STORE_SUBSCR);
                 }
             }
-            // _STORE_SUBSCR_CHECK_FUNC
+            // _STORE_SUBSCR_PY_DUNDER_FRAME
             {
+                sub = stack_pointer[-1];
                 container = stack_pointer[-2];
+                v = stack_pointer[-3];
                 PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(container));
                 if (!PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE)) {
                     UPDATE_MISS_STATS(STORE_SUBSCR);
@@ -12921,16 +12922,7 @@
                     assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
                     JUMP_TO_PREDICTED(STORE_SUBSCR);
                 }
-                setitem = PyStackRef_FromPyObjectNew(setitem_o);
-            }
-            // _STORE_SUBSCR_INIT_CALL
-            {
-                sub = stack_pointer[-1];
-                v = stack_pointer[-3];
                 STAT_INC(STORE_SUBSCR, hit);
-                stack_pointer[0] = setitem;
-                stack_pointer += 1;
-                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
                 _PyFrame_SetStackPointer(frame, stack_pointer);
                 _PyFrame_StackPointerValidate(frame);
                 _PyInterpreterFrame *shim = _PyFrame_PushTrampolineUnchecked(
@@ -12938,11 +12930,11 @@
                 _PyFrame_StackPointerInvalidate(frame);
                 assert(_PyFrame_GetBytecode(shim)[0].op.code == EXIT_SETITEM);
                 _PyInterpreterFrame *pushed_frame = _PyFrame_PushUnchecked(
-                    tstate, setitem, 3, shim);
+                    tstate, PyStackRef_FromPyObjectNew(setitem_o), 3, shim);
                 pushed_frame->localsplus[0] = container;
                 pushed_frame->localsplus[1] = sub;
                 pushed_frame->localsplus[2] = v;
-                stack_pointer += -4;
+                stack_pointer += -3;
                 ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
                 frame->return_offset = 2u ;
                 tstate->py_recursion_remaining--;
