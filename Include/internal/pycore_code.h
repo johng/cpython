@@ -549,6 +549,7 @@ extern PyObject *_PyInstrumentation_BranchesIterator(PyCodeObject *code);
 struct _PyCode8 _PyCode_DEF(8);
 
 PyAPI_DATA(const struct _PyCode8) _Py_InitCleanup;
+PyAPI_DATA(const struct _PyCode8) _Py_SetItemCleanup;
 
 #ifdef Py_GIL_DISABLED
 

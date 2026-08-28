@@ -198,6 +198,8 @@ int _PyOpcode_num_popped(int opcode, int oparg)  {
             return 0;
         case EXIT_INIT_CHECK:
             return 1;
+        case EXIT_SETITEM:
+            return 1;
         case EXTENDED_ARG:
             return 0;
         case FORMAT_SIMPLE:
@@ -482,6 +484,8 @@ int _PyOpcode_num_popped(int opcode, int oparg)  {
             return 3;
         case STORE_SUBSCR_LIST_INT:
             return 3;
+        case STORE_SUBSCR_PY_DUNDER:
+            return 3;
         case SWAP:
             return 2 + (oparg-2);
         case TO_BOOL:
@@ -692,6 +696,8 @@ int _PyOpcode_num_pushed(int opcode, int oparg)  {
         case ENTER_EXECUTOR:
             return 0;
         case EXIT_INIT_CHECK:
+            return 0;
+        case EXIT_SETITEM:
             return 0;
         case EXTENDED_ARG:
             return 0;
@@ -977,6 +983,8 @@ int _PyOpcode_num_pushed(int opcode, int oparg)  {
             return 0;
         case STORE_SUBSCR_LIST_INT:
             return 0;
+        case STORE_SUBSCR_PY_DUNDER:
+            return 0;
         case SWAP:
             return 2 + (oparg-2);
         case TO_BOOL:
@@ -1180,6 +1188,7 @@ const struct opcode_metadata _PyOpcode_opcode_metadata[267] = {
     [END_SEND] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG | HAS_PURE_FLAG },
     [ENTER_EXECUTOR] = { true, INSTR_FMT_IB, HAS_ARG_FLAG },
     [EXIT_INIT_CHECK] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ERROR_NO_POP_FLAG | HAS_ESCAPES_FLAG },
+    [EXIT_SETITEM] = { true, INSTR_FMT_IX, HAS_ESCAPES_FLAG | HAS_SYNC_SP_FLAG | HAS_NEEDS_GUARD_IP_FLAG },
     [EXTENDED_ARG] = { true, INSTR_FMT_IB, HAS_ARG_FLAG },
     [FORMAT_SIMPLE] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [FORMAT_WITH_SPEC] = { true, INSTR_FMT_IX, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
@@ -1312,6 +1321,7 @@ const struct opcode_metadata _PyOpcode_opcode_metadata[267] = {
     [STORE_SUBSCR] = { true, INSTR_FMT_IXC, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [STORE_SUBSCR_DICT] = { true, INSTR_FMT_IXC, HAS_DEOPT_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG | HAS_RECORDS_VALUE_FLAG },
     [STORE_SUBSCR_LIST_INT] = { true, INSTR_FMT_IXC, HAS_DEOPT_FLAG | HAS_EXIT_FLAG | HAS_ESCAPES_FLAG },
+    [STORE_SUBSCR_PY_DUNDER] = { true, INSTR_FMT_IXC, HAS_DEOPT_FLAG | HAS_ESCAPES_FLAG | HAS_SYNC_SP_FLAG | HAS_NEEDS_GUARD_IP_FLAG },
     [SWAP] = { true, INSTR_FMT_IB, HAS_ARG_FLAG | HAS_PURE_FLAG },
     [TO_BOOL] = { true, INSTR_FMT_IXC00, HAS_ERROR_FLAG | HAS_ESCAPES_FLAG },
     [TO_BOOL_ALWAYS_TRUE] = { true, INSTR_FMT_IXC00, HAS_EXIT_FLAG | HAS_ESCAPES_FLAG | HAS_RECORDS_VALUE_FLAG },
@@ -1632,6 +1642,7 @@ const char *_PyOpcode_OpName[267] = {
     [END_SEND] = "END_SEND",
     [ENTER_EXECUTOR] = "ENTER_EXECUTOR",
     [EXIT_INIT_CHECK] = "EXIT_INIT_CHECK",
+    [EXIT_SETITEM] = "EXIT_SETITEM",
     [EXTENDED_ARG] = "EXTENDED_ARG",
     [FORMAT_SIMPLE] = "FORMAT_SIMPLE",
     [FORMAT_WITH_SPEC] = "FORMAT_WITH_SPEC",
@@ -1774,6 +1785,7 @@ const char *_PyOpcode_OpName[267] = {
     [STORE_SUBSCR] = "STORE_SUBSCR",
     [STORE_SUBSCR_DICT] = "STORE_SUBSCR_DICT",
     [STORE_SUBSCR_LIST_INT] = "STORE_SUBSCR_LIST_INT",
+    [STORE_SUBSCR_PY_DUNDER] = "STORE_SUBSCR_PY_DUNDER",
     [SWAP] = "SWAP",
     [TO_BOOL] = "TO_BOOL",
     [TO_BOOL_ALWAYS_TRUE] = "TO_BOOL_ALWAYS_TRUE",
@@ -1827,7 +1839,6 @@ const uint8_t _PyOpcode_Caches[256] = {
 PyAPI_DATA(const uint8_t) _PyOpcode_Deopt[256];
 #ifdef NEED_OPCODE_METADATA
 const uint8_t _PyOpcode_Deopt[256] = {
-    [117] = 117,
     [118] = 118,
     [119] = 119,
     [120] = 120,
@@ -1838,7 +1849,6 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [125] = 125,
     [126] = 126,
     [127] = 127,
-    [219] = 219,
     [220] = 220,
     [221] = 221,
     [222] = 222,
@@ -1932,6 +1942,7 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [END_SEND] = END_SEND,
     [ENTER_EXECUTOR] = ENTER_EXECUTOR,
     [EXIT_INIT_CHECK] = EXIT_INIT_CHECK,
+    [EXIT_SETITEM] = EXIT_SETITEM,
     [EXTENDED_ARG] = EXTENDED_ARG,
     [FORMAT_SIMPLE] = FORMAT_SIMPLE,
     [FORMAT_WITH_SPEC] = FORMAT_WITH_SPEC,
@@ -2064,6 +2075,7 @@ const uint8_t _PyOpcode_Deopt[256] = {
     [STORE_SUBSCR] = STORE_SUBSCR,
     [STORE_SUBSCR_DICT] = STORE_SUBSCR,
     [STORE_SUBSCR_LIST_INT] = STORE_SUBSCR,
+    [STORE_SUBSCR_PY_DUNDER] = STORE_SUBSCR,
     [SWAP] = SWAP,
     [TO_BOOL] = TO_BOOL,
     [TO_BOOL_ALWAYS_TRUE] = TO_BOOL,
@@ -2088,7 +2100,6 @@ const uint8_t _PyOpcode_Deopt[256] = {
 #endif // NEED_OPCODE_METADATA
 
 #define EXTRA_CASES \
-    case 117: \
     case 118: \
     case 119: \
     case 120: \
@@ -2099,7 +2110,6 @@ const uint8_t _PyOpcode_Deopt[256] = {
     case 125: \
     case 126: \
     case 127: \
-    case 219: \
     case 220: \
     case 221: \
     case 222: \

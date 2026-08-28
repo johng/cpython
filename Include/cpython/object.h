@@ -268,6 +268,12 @@ struct _specialization_cache {
     //   *args nor **kwargs (as required by BINARY_OP_SUBSCR_GETITEM):
     PyObject *getitem;
     uint32_t getitem_version;
+    // The same contract applies to setitem, except that it is the Python
+    // function that PyType_Lookup(cls, "__setitem__") would return, and it is
+    // called with three positional arguments (as required by
+    // STORE_SUBSCR_PY_DUNDER):
+    PyObject *setitem;
+    uint32_t setitem_version;
     PyObject *init;
 };
 

@@ -1619,6 +1619,26 @@ _Py_Specialize_StoreSubscr(_PyStackRef container_st, _PyStackRef sub_st, _Py_COD
         specialize(instr, STORE_SUBSCR_DICT);
         return;
     }
+    unsigned int tp_version;
+    PyObject *descriptor = _PyType_LookupRefAndVersion(container_type, &_Py_ID(__setitem__), &tp_version);
+    if (descriptor && Py_TYPE(descriptor) == &PyFunction_Type &&
+        container_type->tp_flags & Py_TPFLAGS_HEAPTYPE)
+    {
+        PyFunctionObject *func = (PyFunctionObject *)descriptor;
+        PyCodeObject *fcode = (PyCodeObject *)func->func_code;
+        int kind = function_kind(fcode);
+        PyHeapTypeObject *ht = (PyHeapTypeObject *)container_type;
+        if (kind == SIMPLE_FUNCTION &&
+            fcode->co_argcount == 3 &&
+            _PyInterpreterState_IsSpecializationEnabled(_PyInterpreterState_GET()) && /* Don't specialize if PEP 523 is active */
+            _PyType_CacheSetItemForSpecialization(ht, descriptor, (uint32_t)tp_version))
+        {
+            specialize(instr, STORE_SUBSCR_PY_DUNDER);
+            Py_DECREF(descriptor);
+            return;
+        }
+    }
+    Py_XDECREF(descriptor);
     SPECIALIZATION_FAIL(STORE_SUBSCR, store_subscr_fail_kind(container, sub));
     unspecialize(instr);
 }
@@ -3075,5 +3095,50 @@ const struct _PyCode8 _Py_InitCleanup = {
         RETURN_VALUE, 0,
         RESUME, RESUME_AT_FUNC_START,
         CACHE, 0, /* RESUME's cache */
+    }
+};
+
+/* Store subscript cleanup.
+ * STORE_SUBSCR_PY_DUNDER pushes this shim underneath the frame for a Python
+ * `__setitem__`, so that the dunder returns into the shim rather than into the
+ * frame executing STORE_SUBSCR. EXIT_SETITEM then discards the returned value
+ * and pops the shim without pushing anything, which is what keeps the net
+ * stack effect of STORE_SUBSCR_PY_DUNDER at -3.
+ *
+ * The same constraints as _Py_InitCleanup apply: it is used as a plain code
+ * object rather than a function, so it must not access globals or builtins,
+ * the trailing RESUME must never be executed, and it must contain no
+ * specializable instructions.
+ */
+#ifdef Py_GIL_DISABLED
+static _PyCodeArray setitem_cleanup_tlbc = {
+    .size = 1,
+    .entries = {(char*) &_Py_SetItemCleanup.co_code_adaptive},
+};
+#endif
+
+const struct _PyCode8 _Py_SetItemCleanup = {
+    _PyVarObject_HEAD_INIT(&PyCode_Type, 2),
+    .co_consts = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_names = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_exceptiontable = (PyObject *)&_Py_SINGLETON(bytes_empty),
+    .co_flags = CO_OPTIMIZED | CO_NO_MONITORING_EVENTS,
+    .co_localsplusnames = (PyObject *)&_Py_SINGLETON(tuple_empty),
+    .co_localspluskinds = (PyObject *)&_Py_SINGLETON(bytes_empty),
+    .co_filename = &_Py_ID(__setitem__),
+    .co_name = &_Py_ID(__setitem__),
+    .co_qualname = &_Py_ID(__setitem__),
+    .co_linetable = (PyObject *)&no_location,
+    ._co_firsttraceable = 3,
+    .co_stacksize = 1,
+    .co_framesize = 1 + FRAME_SPECIALS_SIZE,
+#ifdef Py_GIL_DISABLED
+    .co_tlbc = &setitem_cleanup_tlbc,
+#endif
+    .co_code_adaptive = {
+        EXIT_SETITEM, 0,
+        RESUME, RESUME_AT_FUNC_START,
+        CACHE, 0, /* RESUME's cache */
+        CACHE, 0, /* padding */
     }
 };
