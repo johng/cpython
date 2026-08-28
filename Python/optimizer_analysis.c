@@ -39,6 +39,16 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/* The trampoline shims (_Py_InitCleanup, _Py_SetItemCleanup) do not have their
+ * abstract stack maintained the way real frames do, so several checks are
+ * skipped while one is the current frame. */
+static inline bool
+is_shim_code(PyCodeObject *code)
+{
+    return code == (PyCodeObject *)&_Py_InitCleanup ||
+           code == (PyCodeObject *)&_Py_SetItemCleanup;
+}
+
 #ifdef Py_DEBUG
     extern const char *_PyUOpName(int index);
     extern void _PyUOpPrint(const _PyUOpInstruction *uop);
@@ -90,7 +100,7 @@ dump_uop(JitOptContext *ctx, const char *label, int index,
         printf("%4d %s: ", index, label);
         _PyUOpPrint(instr);
         printf("\n");
-        if (get_lltrace() >= 5 && ctx->frame->code != ((PyCodeObject *)&_Py_InitCleanup)) {
+        if (get_lltrace() >= 5 && !is_shim_code(ctx->frame->code)) {
             dump_abstract_stack(ctx->frame, stack_pointer);
         }
     }
@@ -234,7 +244,7 @@ is_terminator_uop(const _PyUOpInstruction *uop)
     );
 }
 
-#define CURRENT_FRAME_IS_INIT_SHIM() (ctx->frame->code == ((PyCodeObject *)&_Py_InitCleanup))
+#define CURRENT_FRAME_IS_INIT_SHIM() is_shim_code(ctx->frame->code)
 
 #define GETLOCAL(idx)          ((ctx->frame->locals[idx]))
 
@@ -546,7 +556,7 @@ _Py_opt_assert_within_stack_bounds(
     _Py_UOpsAbstractFrame *frame, JitOptRef *stack_pointer,
     const char *filename, int lineno
 ) {
-    if (frame->code == ((PyCodeObject *)&_Py_InitCleanup)) {
+    if (is_shim_code(frame->code)) {
         return;
     }
     int level = (int)(stack_pointer - frame->stack);

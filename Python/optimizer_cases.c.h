@@ -1729,6 +1729,76 @@
             break;
         }
 
+        case _STORE_SUBSCR_PY_DUNDER_FRAME: {
+            JitOptRef sub;
+            JitOptRef container;
+            JitOptRef v;
+            JitOptRef new_frame;
+            sub = stack_pointer[-1];
+            container = stack_pointer[-2];
+            v = stack_pointer[-3];
+            PyTypeObject *tp = sym_get_type(container);
+            if (tp == NULL) {
+                PyObject *c = sym_get_probable_value(container);
+                if (c != NULL) {
+                    tp = Py_TYPE(c);
+                }
+            }
+            if (tp == NULL || !PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE)) {
+                ctx->done = true;
+                break;
+            }
+            PyObject *setitem_o = ((PyHeapTypeObject *)tp)->_spec_cache.setitem;
+            if (setitem_o == NULL || !PyFunction_Check(setitem_o)) {
+                ctx->done = true;
+                break;
+            }
+            _Py_BloomFilter_Add(dependencies, setitem_o);
+            ctx->frame->stack_pointer = stack_pointer - 3;
+            _Py_UOpsAbstractFrame *shim = frame_new(ctx, (PyCodeObject *)&_Py_SetItemCleanup, NULL, 0);
+            if (shim == NULL) {
+                break;
+            }
+            ctx->frame = shim;
+            ctx->curr_frame_depth++;
+            assert((this_instr + 1)->opcode == _PUSH_FRAME);
+            PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(setitem_o);
+            _Py_UOpsAbstractFrame *f = frame_new(ctx, co, NULL, 0);
+            if (f == NULL) {
+                break;
+            }
+            f->locals[0] = container;
+            f->locals[1] = sub;
+            f->locals[2] = v;
+            f->func = (PyFunctionObject *)setitem_o;
+            new_frame = PyJitRef_WrapInvalid(f);
+            CHECK_STACK_BOUNDS(-2);
+            stack_pointer[-3] = new_frame;
+            stack_pointer += -2;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            break;
+        }
+
+        case _EXIT_SETITEM: {
+            JitOptRef retval;
+            retval = stack_pointer[-1];
+            CHECK_STACK_BOUNDS(-1);
+            stack_pointer += -1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            ctx->frame->stack_pointer = stack_pointer;
+            assert(this_instr[1].opcode == _RECORD_CODE);
+            PyCodeObject *returning_code = (PyCodeObject *)this_instr[1].operand0;
+            if (returning_code == NULL) {
+                ctx->done = true;
+                break;
+            }
+            if (frame_pop(ctx, returning_code)) {
+                break;
+            }
+            stack_pointer = ctx->frame->stack_pointer;
+            break;
+        }
+
         case _STORE_SUBSCR_LIST_INT: {
             JitOptRef sub_st;
             JitOptRef list_st;

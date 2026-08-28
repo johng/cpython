@@ -266,9 +266,18 @@ struct _specialization_cache {
     // - If getitem->func_version == getitem_version, then getitem can be called
     //   with two positional arguments and no keyword arguments, and has neither
     //   *args nor **kwargs (as required by BINARY_OP_SUBSCR_GETITEM):
+    // The same contract applies to setitem, except that it is the Python
+    // function that PyType_Lookup(cls, "__setitem__") would return, and it is
+    // called with three positional arguments (as required by
+    // STORE_SUBSCR_PY_DUNDER).
+    // The pointers are grouped ahead of the versions so that the two version
+    // fields share one word of padding, which keeps this struct at 32 bytes
+    // rather than 40.
     PyObject *getitem;
-    uint32_t getitem_version;
+    PyObject *setitem;
     PyObject *init;
+    uint32_t getitem_version;
+    uint32_t setitem_version;
 };
 
 /* The *real* layout of a type object when allocated on the heap */

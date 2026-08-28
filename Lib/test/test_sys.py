@@ -1825,7 +1825,7 @@ class SizeofTest(unittest.TestCase):
                   '10P'                 # PySequenceMethods
                   '2P'                  # PyBufferProcs
                   '7P'
-                  '1PIP'                # Specializer cache
+                  '3P2I'                # Specializer cache
                   + typeid              # heap type id (free-threaded only)
                   )
         class newstyleclass(object): pass

@@ -1393,6 +1393,7 @@ dummy_func(
         family(STORE_SUBSCR, INLINE_CACHE_ENTRIES_STORE_SUBSCR) = {
             STORE_SUBSCR_DICT,
             STORE_SUBSCR_LIST_INT,
+            STORE_SUBSCR_PY_DUNDER,
         };
 
         specializing op(_SPECIALIZE_STORE_SUBSCR, (counter/1, container, sub -- container, sub)) {
@@ -1415,6 +1416,81 @@ dummy_func(
         }
 
         macro(STORE_SUBSCR) = _SPECIALIZE_STORE_SUBSCR + _STORE_SUBSCR;
+
+        /* Specialization for a `__setitem__` implemented in Python.
+         *
+         * Unlike BINARY_OP_SUBSCR_GETITEM, we cannot simply push the frame for
+         * the dunder and let its return value land on the stack: STORE_SUBSCR
+         * has to pop three operands and push nothing, but a returning frame
+         * always pushes exactly one value (see _RETURN_VALUE).
+         *
+         * So we push a shim frame (_Py_SetItemCleanup) underneath the
+         * `__setitem__` frame, in the same way CALL_ALLOC_AND_ENTER_INIT uses
+         * _Py_InitCleanup. `__setitem__` returns into the shim rather than into
+         * this frame, and the shim's EXIT_SETITEM discards that value and pops
+         * the shim without pushing anything, leaving the net effect at -3.
+         */
+        op(_STORE_SUBSCR_PY_DUNDER_FRAME, (v, container, sub -- new_frame)) {
+            PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(container));
+            DEOPT_IF(!PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE));
+            PyHeapTypeObject *ht = (PyHeapTypeObject *)tp;
+            PyObject *setitem_o = FT_ATOMIC_LOAD_PTR_ACQUIRE(ht->_spec_cache.setitem);
+            DEOPT_IF(setitem_o == NULL);
+            assert(PyFunction_Check(setitem_o));
+            uint32_t cached_version = FT_ATOMIC_LOAD_UINT32_RELAXED(ht->_spec_cache.setitem_version);
+            DEOPT_IF(((PyFunctionObject *)setitem_o)->func_version != cached_version);
+            PyCodeObject *fcode = (PyCodeObject *)PyFunction_GET_CODE(setitem_o);
+            assert(fcode->co_argcount == 3);
+            DEOPT_IF(!_PyThreadState_HasStackSpace(
+                tstate, fcode->co_framesize + _Py_SetItemCleanup.co_framesize));
+            STAT_INC(STORE_SUBSCR, hit);
+            /* `setitem` is deliberately kept in a C local rather than pushed as
+             * a stack output: STORE_SUBSCR already occupies three stack slots,
+             * and one more would exceed the frame's co_stacksize. */
+            _PyInterpreterFrame *shim = _PyFrame_PushTrampolineUnchecked(
+                tstate, (PyCodeObject *)&_Py_SetItemCleanup, 0, frame);
+            assert(_PyFrame_GetBytecode(shim)[0].op.code == EXIT_SETITEM);
+            _PyInterpreterFrame *pushed_frame = _PyFrame_PushUnchecked(
+                tstate, PyStackRef_FromPyObjectNew(setitem_o), 3, shim);
+            pushed_frame->localsplus[0] = container;
+            pushed_frame->localsplus[1] = sub;
+            pushed_frame->localsplus[2] = v;
+            DEAD(container);
+            DEAD(sub);
+            DEAD(v);
+            SYNC_SP();
+            frame->return_offset = INSTRUCTION_SIZE;
+            /* Account for pushing the extra shim frame.
+             * We don't check recursion depth here,
+             * as it will be checked after start_frame */
+            tstate->py_recursion_remaining--;
+            new_frame = PyStackRef_Wrap(pushed_frame);
+        }
+
+        macro(STORE_SUBSCR_PY_DUNDER) =
+            unused/1 +
+            _CHECK_PEP_523 +
+            _CHECK_RECURSION_REMAINING +
+            _STORE_SUBSCR_PY_DUNDER_FRAME +
+            _PUSH_FRAME;
+
+        /* Only ever executed as the sole instruction of the _Py_SetItemCleanup
+         * shim frame. Discards whatever `__setitem__` returned (slot_mp_ass_subscript
+         * ignores it too) and pops the shim frame without pushing a result. */
+        inst(EXIT_SETITEM, (retval -- )) {
+            assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
+            PyStackRef_CLOSE(retval);
+            SAVE_STACK();
+            assert(STACK_LEVEL() == 0);
+            _Py_LeaveRecursiveCallPy(tstate);
+            // GH-99729: We need to unlink the frame *before* clearing it:
+            _PyInterpreterFrame *dying = frame;
+            frame = tstate->current_frame = dying->previous;
+            _PyEval_FrameClearAndPop(tstate, dying);
+            RELOAD_STACK();
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+        }
 
         macro(STORE_SUBSCR_LIST_INT) =
             _GUARD_TOS_INT + _GUARD_NOS_LIST + unused/1 + _STORE_SUBSCR_LIST_INT + _POP_TOP_INT + POP_TOP;

@@ -2038,6 +2038,74 @@ class TestSpecializer(TestBase):
 
         store_subscr_dict_subclass_override()
         self.assert_no_opcode(store_subscr_dict_subclass_override, "STORE_SUBSCR_DICT")
+        self.assert_specialized(store_subscr_dict_subclass_override,
+                                "STORE_SUBSCR_PY_DUNDER")
+
+        def store_subscr_py_dunder():
+            class C:
+                __slots__ = ("cell",)
+                def __setitem__(self, key, value):
+                    self.cell = (key, value)
+
+            for i in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                c = C()
+                c[i] = i + 1
+                self.assertEqual(c.cell, (i, i + 1))
+
+        store_subscr_py_dunder()
+        self.assert_specialized(store_subscr_py_dunder, "STORE_SUBSCR_PY_DUNDER")
+        self.assert_no_opcode(store_subscr_py_dunder, "STORE_SUBSCR")
+
+        def store_subscr_py_dunder_returns_value():
+            # Like slot_mp_ass_subscript, the return value of __setitem__ is
+            # ignored rather than required to be None.
+            class C:
+                def __setitem__(self, key, value):
+                    self.stored = value
+                    return "ignored"
+
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                c = C()
+                c[0] = 7
+                self.assertEqual(c.stored, 7)
+
+        store_subscr_py_dunder_returns_value()
+        self.assert_specialized(store_subscr_py_dunder_returns_value,
+                                "STORE_SUBSCR_PY_DUNDER")
+
+        def store_subscr_py_dunder_raises():
+            class C:
+                def __setitem__(self, key, value):
+                    raise ValueError(key)
+
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                c = C()
+                with self.assertRaises(ValueError):
+                    c["boom"] = 1
+
+        store_subscr_py_dunder_raises()
+        self.assert_specialized(store_subscr_py_dunder_raises,
+                                "STORE_SUBSCR_PY_DUNDER")
+
+        def store_subscr_py_dunder_deopt():
+            # Rebinding __setitem__ invalidates the type's specialization
+            # cache, so the specialized form must deopt cleanly.
+            class C:
+                def __setitem__(self, key, value):
+                    self.stored = ("first", value)
+
+            c = C()
+            for _ in range(_testinternalcapi.SPECIALIZATION_THRESHOLD):
+                c[0] = 1
+            self.assertEqual(c.stored, ("first", 1))
+
+            def replacement(self, key, value):
+                self.stored = ("second", value)
+            C.__setitem__ = replacement
+            c[0] = 2
+            self.assertEqual(c.stored, ("second", 2))
+
+        store_subscr_py_dunder_deopt()
 
     @cpython_only
     @requires_specialization

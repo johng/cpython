@@ -1,0 +1,3 @@
+Specialize :opcode:`STORE_SUBSCR` as ``STORE_SUBSCR_PY_DUNDER`` when the
+container's ``__setitem__`` is implemented in Python, entering the method
+directly instead of calling it through :c:func:`PyObject_SetItem`.

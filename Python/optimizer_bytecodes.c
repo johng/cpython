@@ -578,6 +578,65 @@ dummy_func(void) {
         }
     }
 
+    op(_STORE_SUBSCR_PY_DUNDER_FRAME, (v, container, sub -- new_frame)) {
+        /* The runtime uop keeps the cached function in a C local rather than on
+         * the stack (STORE_SUBSCR has no spare stack slot), so recover it here
+         * from the container's type the same way _BINARY_OP_SUBSCR_CHECK_FUNC
+         * does for __getitem__. */
+        PyTypeObject *tp = sym_get_type(container);
+        if (tp == NULL) {
+            PyObject *c = sym_get_probable_value(container);
+            if (c != NULL) {
+                tp = Py_TYPE(c);
+            }
+        }
+        if (tp == NULL || !PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE)) {
+            ctx->done = true;
+            break;
+        }
+        PyObject *setitem_o = ((PyHeapTypeObject *)tp)->_spec_cache.setitem;
+        if (setitem_o == NULL || !PyFunction_Check(setitem_o)) {
+            ctx->done = true;
+            break;
+        }
+        _Py_BloomFilter_Add(dependencies, setitem_o);
+        ctx->frame->stack_pointer = stack_pointer - 3;
+        _Py_UOpsAbstractFrame *shim = frame_new(ctx, (PyCodeObject *)&_Py_SetItemCleanup, NULL, 0);
+        if (shim == NULL) {
+            break;
+        }
+        ctx->frame = shim;
+        ctx->curr_frame_depth++;
+        assert((this_instr + 1)->opcode == _PUSH_FRAME);
+        PyCodeObject *co = (PyCodeObject *)PyFunction_GET_CODE(setitem_o);
+        _Py_UOpsAbstractFrame *f = frame_new(ctx, co, NULL, 0);
+        if (f == NULL) {
+            break;
+        }
+        f->locals[0] = container;
+        f->locals[1] = sub;
+        f->locals[2] = v;
+        f->func = (PyFunctionObject *)setitem_o;
+        new_frame = PyJitRef_WrapInvalid(f);
+    }
+
+    op(_EXIT_SETITEM, (retval -- )) {
+        DEAD(retval);
+        SAVE_STACK();
+        ctx->frame->stack_pointer = stack_pointer;
+        assert(this_instr[1].opcode == _RECORD_CODE);
+        PyCodeObject *returning_code = (PyCodeObject *)this_instr[1].operand0;
+        if (returning_code == NULL) {
+            ctx->done = true;
+            break;
+        }
+        if (frame_pop(ctx, returning_code)) {
+            break;
+        }
+        stack_pointer = ctx->frame->stack_pointer;
+        RELOAD_STACK();
+    }
+
     op(_BINARY_OP_SUBSCR_INIT_CALL, (container, sub, getitem -- new_frame)) {
         _Py_UOpsAbstractFrame *f = frame_new_from_symbol(ctx, getitem, NULL, 0);
         if (f == NULL) {

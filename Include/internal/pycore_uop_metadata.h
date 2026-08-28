@@ -157,6 +157,8 @@ const uint32_t _PyUop_Flags[MAX_UOP_ID+1] = {
     [_LIST_APPEND] = HAS_ARG_FLAG | HAS_ERROR_FLAG,
     [_SET_ADD] = HAS_ARG_FLAG | HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
     [_STORE_SUBSCR] = HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
+    [_STORE_SUBSCR_PY_DUNDER_FRAME] = HAS_DEOPT_FLAG | HAS_ESCAPES_FLAG | HAS_SYNC_SP_FLAG,
+    [_EXIT_SETITEM] = HAS_ESCAPES_FLAG | HAS_SYNC_SP_FLAG | HAS_NEEDS_GUARD_IP_FLAG,
     [_STORE_SUBSCR_LIST_INT] = HAS_DEOPT_FLAG | HAS_ESCAPES_FLAG,
     [_STORE_SUBSCR_DICT] = HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
     [_STORE_SUBSCR_DICT_KNOWN_HASH] = HAS_ERROR_FLAG | HAS_ESCAPES_FLAG,
@@ -1541,6 +1543,24 @@ const _PyUopCachingInfo _PyUop_Caching[MAX_UOP_ID+1] = {
             { -1, -1, -1 },
             { -1, -1, -1 },
             { 0, 3, _STORE_SUBSCR_r30 },
+        },
+    },
+    [_STORE_SUBSCR_PY_DUNDER_FRAME] = {
+        .best = { 3, 3, 3, 3 },
+        .entries = {
+            { -1, -1, -1 },
+            { -1, -1, -1 },
+            { -1, -1, -1 },
+            { 1, 1, _STORE_SUBSCR_PY_DUNDER_FRAME_r31 },
+        },
+    },
+    [_EXIT_SETITEM] = {
+        .best = { 1, 1, 1, 1 },
+        .entries = {
+            { -1, -1, -1 },
+            { 0, 0, _EXIT_SETITEM_r10 },
+            { -1, -1, -1 },
+            { -1, -1, -1 },
         },
     },
     [_STORE_SUBSCR_LIST_INT] = {
@@ -4251,6 +4271,8 @@ const uint16_t _PyUop_Uncached[MAX_UOP_REGS_ID+1] = {
     [_LIST_APPEND_r10] = _LIST_APPEND,
     [_SET_ADD_r10] = _SET_ADD,
     [_STORE_SUBSCR_r30] = _STORE_SUBSCR,
+    [_STORE_SUBSCR_PY_DUNDER_FRAME_r31] = _STORE_SUBSCR_PY_DUNDER_FRAME,
+    [_EXIT_SETITEM_r10] = _EXIT_SETITEM,
     [_STORE_SUBSCR_LIST_INT_r32] = _STORE_SUBSCR_LIST_INT,
     [_STORE_SUBSCR_DICT_r31] = _STORE_SUBSCR_DICT,
     [_STORE_SUBSCR_DICT_KNOWN_HASH_r31] = _STORE_SUBSCR_DICT_KNOWN_HASH,
@@ -5182,6 +5204,8 @@ const char *const _PyOpcode_uop_name[MAX_UOP_REGS_ID+1] = {
     [_ERROR_POP_N_r00] = "_ERROR_POP_N_r00",
     [_EXIT_INIT_CHECK] = "_EXIT_INIT_CHECK",
     [_EXIT_INIT_CHECK_r10] = "_EXIT_INIT_CHECK_r10",
+    [_EXIT_SETITEM] = "_EXIT_SETITEM",
+    [_EXIT_SETITEM_r10] = "_EXIT_SETITEM_r10",
     [_EXIT_TRACE] = "_EXIT_TRACE",
     [_EXIT_TRACE_r00] = "_EXIT_TRACE_r00",
     [_EXIT_TRACE_r10] = "_EXIT_TRACE_r10",
@@ -6040,6 +6064,8 @@ const char *const _PyOpcode_uop_name[MAX_UOP_REGS_ID+1] = {
     [_STORE_SUBSCR_DICT_KNOWN_HASH_r31] = "_STORE_SUBSCR_DICT_KNOWN_HASH_r31",
     [_STORE_SUBSCR_LIST_INT] = "_STORE_SUBSCR_LIST_INT",
     [_STORE_SUBSCR_LIST_INT_r32] = "_STORE_SUBSCR_LIST_INT_r32",
+    [_STORE_SUBSCR_PY_DUNDER_FRAME] = "_STORE_SUBSCR_PY_DUNDER_FRAME",
+    [_STORE_SUBSCR_PY_DUNDER_FRAME_r31] = "_STORE_SUBSCR_PY_DUNDER_FRAME_r31",
     [_SWAP] = "_SWAP",
     [_SWAP_r11] = "_SWAP_r11",
     [_SWAP_2] = "_SWAP_2",
@@ -6410,6 +6436,10 @@ int _PyUop_num_popped(int opcode, int oparg)
             return 1;
         case _STORE_SUBSCR:
             return 3;
+        case _STORE_SUBSCR_PY_DUNDER_FRAME:
+            return 3;
+        case _EXIT_SETITEM:
+            return 1;
         case _STORE_SUBSCR_LIST_INT:
             return 3;
         case _STORE_SUBSCR_DICT:

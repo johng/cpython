@@ -6215,6 +6215,37 @@
             DISPATCH();
         }
 
+        TARGET(EXIT_SETITEM) {
+            #if _Py_TAIL_CALL_INTERP
+            int opcode = EXIT_SETITEM;
+            (void)(opcode);
+            #endif
+            frame->instr_ptr = next_instr;
+            next_instr += 1;
+            INSTRUCTION_STATS(EXIT_SETITEM);
+            _PyStackRef retval;
+            retval = stack_pointer[-1];
+            assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
+            stack_pointer += -1;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            _PyFrame_StackPointerValidate(frame);
+            PyStackRef_CLOSE(retval);
+            _PyFrame_StackPointerInvalidate(frame);
+            assert(stack_pointer == _PyFrame_GetStackPointer(frame));
+            _PyFrame_StackPointerValidate(frame);
+            assert(STACK_LEVEL() == 0);
+            _Py_LeaveRecursiveCallPy(tstate);
+            _PyInterpreterFrame *dying = frame;
+            frame = tstate->current_frame = dying->previous;
+            _PyEval_FrameClearAndPop(tstate, dying);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            _PyFrame_StackPointerInvalidate(frame);
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+            DISPATCH();
+        }
+
         TARGET(EXTENDED_ARG) {
             #if _Py_TAIL_CALL_INTERP
             int opcode = EXTENDED_ARG;
@@ -12830,6 +12861,111 @@
                 _PyFrame_StackPointerValidate(frame);
                 PyStackRef_XCLOSE(value);
                 _PyFrame_StackPointerInvalidate(frame);
+            }
+            DISPATCH();
+        }
+
+        TARGET(STORE_SUBSCR_PY_DUNDER) {
+            #if _Py_TAIL_CALL_INTERP
+            int opcode = STORE_SUBSCR_PY_DUNDER;
+            (void)(opcode);
+            #endif
+            _Py_CODEUNIT* const this_instr = next_instr;
+            (void)this_instr;
+            frame->instr_ptr = next_instr;
+            next_instr += 2;
+            INSTRUCTION_STATS(STORE_SUBSCR_PY_DUNDER);
+            static_assert(INLINE_CACHE_ENTRIES_STORE_SUBSCR == 1, "incorrect cache size");
+            _PyStackRef v;
+            _PyStackRef container;
+            _PyStackRef sub;
+            _PyStackRef new_frame;
+            /* Skip 1 cache entry */
+            // _CHECK_PEP_523
+            {
+                if (IS_PEP523_HOOKED(tstate)) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+            }
+            // _CHECK_RECURSION_REMAINING
+            {
+                if (tstate->py_recursion_remaining <= 1) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+            }
+            // _STORE_SUBSCR_PY_DUNDER_FRAME
+            {
+                sub = stack_pointer[-1];
+                container = stack_pointer[-2];
+                v = stack_pointer[-3];
+                PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(container));
+                if (!PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE)) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+                PyHeapTypeObject *ht = (PyHeapTypeObject *)tp;
+                PyObject *setitem_o = FT_ATOMIC_LOAD_PTR_ACQUIRE(ht->_spec_cache.setitem);
+                if (setitem_o == NULL) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+                assert(PyFunction_Check(setitem_o));
+                uint32_t cached_version = FT_ATOMIC_LOAD_UINT32_RELAXED(ht->_spec_cache.setitem_version);
+                if (((PyFunctionObject *)setitem_o)->func_version != cached_version) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+                PyCodeObject *fcode = (PyCodeObject *)PyFunction_GET_CODE(setitem_o);
+                assert(fcode->co_argcount == 3);
+                if (!_PyThreadState_HasStackSpace(
+                        tstate, fcode->co_framesize + _Py_SetItemCleanup.co_framesize)) {
+                    UPDATE_MISS_STATS(STORE_SUBSCR);
+                    assert(_PyOpcode_Deopt[opcode] == (STORE_SUBSCR));
+                    JUMP_TO_PREDICTED(STORE_SUBSCR);
+                }
+                STAT_INC(STORE_SUBSCR, hit);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                _PyFrame_StackPointerValidate(frame);
+                _PyInterpreterFrame *shim = _PyFrame_PushTrampolineUnchecked(
+                    tstate, (PyCodeObject *)&_Py_SetItemCleanup, 0, frame);
+                _PyFrame_StackPointerInvalidate(frame);
+                assert(_PyFrame_GetBytecode(shim)[0].op.code == EXIT_SETITEM);
+                _PyInterpreterFrame *pushed_frame = _PyFrame_PushUnchecked(
+                    tstate, PyStackRef_FromPyObjectNew(setitem_o), 3, shim);
+                pushed_frame->localsplus[0] = container;
+                pushed_frame->localsplus[1] = sub;
+                pushed_frame->localsplus[2] = v;
+                stack_pointer += -3;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                frame->return_offset = 2u ;
+                tstate->py_recursion_remaining--;
+                new_frame = PyStackRef_Wrap(pushed_frame);
+            }
+            // _PUSH_FRAME
+            {
+                assert(!IS_PEP523_HOOKED(tstate));
+                _PyInterpreterFrame *temp = PyStackRef_Unwrap(new_frame);
+                _PyFrame_SetStackPointer(frame, stack_pointer);
+                _PyFrame_StackPointerValidate(frame);
+                assert(temp->previous == frame || temp->previous->previous == frame);
+                CALL_STAT_INC(inlined_py_calls);
+                frame = tstate->current_frame = temp;
+                tstate->py_recursion_remaining--;
+                stack_pointer = _PyFrame_GetStackPointer(frame);
+                _PyFrame_StackPointerInvalidate(frame);
+                LOAD_IP(0);
+                #ifdef Py_DEBUG
+                assert(frame->previous->stackpointer_valid == 1);
+                #endif
+                DTRACE_FUNCTION_ENTRY();
+                LLTRACE_RESUME_FRAME();
             }
             DISPATCH();
         }

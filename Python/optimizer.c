@@ -44,7 +44,10 @@
 static bool
 has_space_for_executor(PyCodeObject *code, _Py_CODEUNIT *instr)
 {
-    if (code == (PyCodeObject *)&_Py_InitCleanup) {
+    if (code == (PyCodeObject *)&_Py_InitCleanup ||
+        code == (PyCodeObject *)&_Py_SetItemCleanup) {
+        /* Statically allocated const shim code objects: inserting an executor
+         * would write ENTER_EXECUTOR into .rodata. */
         return false;
     }
     if (instr->op.code == ENTER_EXECUTOR) {
@@ -530,6 +533,9 @@ guard_ip_uop[MAX_UOP_ID + 1] = {
     [_PUSH_FRAME] = _GUARD_IP__PUSH_FRAME,
     [_RETURN_GENERATOR] = _GUARD_IP_RETURN_GENERATOR,
     [_RETURN_VALUE] = _GUARD_IP_RETURN_VALUE,
+    /* EXIT_SETITEM leaves the same post-pop state as _RETURN_VALUE
+     * (frame popped, IP reloaded from return_offset), so it reuses its guards. */
+    [_EXIT_SETITEM] = _GUARD_IP_RETURN_VALUE,
     [_YIELD_VALUE] = _GUARD_IP_YIELD_VALUE,
 };
 
@@ -538,6 +544,7 @@ guard_code_version_uop[MAX_UOP_ID + 1] = {
     [_PUSH_FRAME] = _GUARD_CODE_VERSION__PUSH_FRAME,
     [_RETURN_GENERATOR] = _GUARD_CODE_VERSION_RETURN_GENERATOR,
     [_RETURN_VALUE] = _GUARD_CODE_VERSION_RETURN_VALUE,
+    [_EXIT_SETITEM] = _GUARD_CODE_VERSION_RETURN_VALUE,
     [_YIELD_VALUE] = _GUARD_CODE_VERSION_YIELD_VALUE,
 };
 

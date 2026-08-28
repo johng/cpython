@@ -8426,6 +8426,127 @@
             break;
         }
 
+        case _STORE_SUBSCR_PY_DUNDER_FRAME_r31: {
+            CHECK_CURRENT_CACHED_VALUES(3);
+            ASSERT_WITHIN_STACK_BOUNDS_IGNORING_CACHE(__FILE__, __LINE__);
+            _PyStackRef sub;
+            _PyStackRef container;
+            _PyStackRef v;
+            _PyStackRef new_frame;
+            _PyStackRef _stack_item_0 = _tos_cache0;
+            _PyStackRef _stack_item_1 = _tos_cache1;
+            _PyStackRef _stack_item_2 = _tos_cache2;
+            sub = _stack_item_2;
+            container = _stack_item_1;
+            v = _stack_item_0;
+            PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(container));
+            if (!PyType_HasFeature(tp, Py_TPFLAGS_HEAPTYPE)) {
+                UOP_STAT_INC(uopcode, miss);
+                _tos_cache0 = sub;
+                SET_CURRENT_CACHED_VALUES(1);
+                stack_pointer[0] = v;
+                stack_pointer[1] = container;
+                stack_pointer += 2;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                JUMP_TO_JUMP_TARGET();
+            }
+            PyHeapTypeObject *ht = (PyHeapTypeObject *)tp;
+            PyObject *setitem_o = FT_ATOMIC_LOAD_PTR_ACQUIRE(ht->_spec_cache.setitem);
+            if (setitem_o == NULL) {
+                UOP_STAT_INC(uopcode, miss);
+                _tos_cache0 = sub;
+                SET_CURRENT_CACHED_VALUES(1);
+                stack_pointer[0] = v;
+                stack_pointer[1] = container;
+                stack_pointer += 2;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                JUMP_TO_JUMP_TARGET();
+            }
+            assert(PyFunction_Check(setitem_o));
+            uint32_t cached_version = FT_ATOMIC_LOAD_UINT32_RELAXED(ht->_spec_cache.setitem_version);
+            if (((PyFunctionObject *)setitem_o)->func_version != cached_version) {
+                UOP_STAT_INC(uopcode, miss);
+                _tos_cache0 = sub;
+                SET_CURRENT_CACHED_VALUES(1);
+                stack_pointer[0] = v;
+                stack_pointer[1] = container;
+                stack_pointer += 2;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                JUMP_TO_JUMP_TARGET();
+            }
+            PyCodeObject *fcode = (PyCodeObject *)PyFunction_GET_CODE(setitem_o);
+            assert(fcode->co_argcount == 3);
+            if (!_PyThreadState_HasStackSpace(
+                         tstate, fcode->co_framesize + _Py_SetItemCleanup.co_framesize)) {
+                UOP_STAT_INC(uopcode, miss);
+                _tos_cache0 = sub;
+                SET_CURRENT_CACHED_VALUES(1);
+                stack_pointer[0] = v;
+                stack_pointer[1] = container;
+                stack_pointer += 2;
+                ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+                JUMP_TO_JUMP_TARGET();
+            }
+            STAT_INC(STORE_SUBSCR, hit);
+            stack_pointer[0] = v;
+            stack_pointer[1] = container;
+            stack_pointer[2] = sub;
+            stack_pointer += 3;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            _PyFrame_StackPointerValidate(frame);
+            _PyInterpreterFrame *shim = _PyFrame_PushTrampolineUnchecked(
+                tstate, (PyCodeObject *)&_Py_SetItemCleanup, 0, frame);
+            _PyFrame_StackPointerInvalidate(frame);
+            assert(_PyFrame_GetBytecode(shim)[0].op.code == EXIT_SETITEM);
+            _PyInterpreterFrame *pushed_frame = _PyFrame_PushUnchecked(
+                tstate, PyStackRef_FromPyObjectNew(setitem_o), 3, shim);
+            pushed_frame->localsplus[0] = container;
+            pushed_frame->localsplus[1] = sub;
+            pushed_frame->localsplus[2] = v;
+            stack_pointer += -3;
+            ASSERT_WITHIN_STACK_BOUNDS(__FILE__, __LINE__);
+            frame->return_offset = 2u ;
+            tstate->py_recursion_remaining--;
+            new_frame = PyStackRef_Wrap(pushed_frame);
+            _tos_cache0 = new_frame;
+            _tos_cache1 = PyStackRef_ZERO_BITS;
+            _tos_cache2 = PyStackRef_ZERO_BITS;
+            SET_CURRENT_CACHED_VALUES(1);
+            ASSERT_WITHIN_STACK_BOUNDS_IGNORING_CACHE(__FILE__, __LINE__);
+            break;
+        }
+
+        case _EXIT_SETITEM_r10: {
+            CHECK_CURRENT_CACHED_VALUES(1);
+            ASSERT_WITHIN_STACK_BOUNDS_IGNORING_CACHE(__FILE__, __LINE__);
+            _PyStackRef retval;
+            _PyStackRef _stack_item_0 = _tos_cache0;
+            retval = _stack_item_0;
+            assert(frame->owner != FRAME_OWNED_BY_INTERPRETER);
+            _PyFrame_SetStackPointer(frame, stack_pointer);
+            _PyFrame_StackPointerValidate(frame);
+            PyStackRef_CLOSE(retval);
+            _PyFrame_StackPointerInvalidate(frame);
+            assert(stack_pointer == _PyFrame_GetStackPointer(frame));
+            _PyFrame_StackPointerValidate(frame);
+            assert(STACK_LEVEL() == 0);
+            _Py_LeaveRecursiveCallPy(tstate);
+            _PyInterpreterFrame *dying = frame;
+            frame = tstate->current_frame = dying->previous;
+            _PyEval_FrameClearAndPop(tstate, dying);
+            stack_pointer = _PyFrame_GetStackPointer(frame);
+            _PyFrame_StackPointerInvalidate(frame);
+            LOAD_IP(frame->return_offset);
+            LLTRACE_RESUME_FRAME();
+            _tos_cache0 = PyStackRef_ZERO_BITS;
+            _tos_cache1 = PyStackRef_ZERO_BITS;
+            _tos_cache2 = PyStackRef_ZERO_BITS;
+            SET_CURRENT_CACHED_VALUES(0);
+            ASSERT_WITHIN_STACK_BOUNDS_IGNORING_CACHE(__FILE__, __LINE__);
+            break;
+        }
+
         case _STORE_SUBSCR_LIST_INT_r32: {
             CHECK_CURRENT_CACHED_VALUES(3);
             ASSERT_WITHIN_STACK_BOUNDS_IGNORING_CACHE(__FILE__, __LINE__);
