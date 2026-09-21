@@ -140,7 +140,6 @@ typedef union {
 
 typedef struct _Py_UOpsAbstractFrame {
     bool globals_watched;
-    bool builtins_checked;
     // The version number of the globals dicts, once checked. 0 if unchecked.
     uint32_t globals_checked_version;
     // Max stacklen
