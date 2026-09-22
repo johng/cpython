@@ -720,6 +720,7 @@ _PyJIT_Compile(_PyExecutorObject *executor, const _PyUOpInstruction trace[], siz
     executor->jit_registration = _PyJit_RegisterCode(
         memory,
         code_size + state.trampolines.size,
+        code_size,
         "jit",
         "executor");
     return 0;

@@ -21,6 +21,7 @@ typedef struct _PyJitCodeRegistration _PyJitCodeRegistration;
  */
 _PyJitCodeRegistration *_PyJit_RegisterCode(const void *code_addr,
                                             size_t code_size,
+                                            size_t unwind_size,
                                             const char *entry,
                                             const char *filename);
 
