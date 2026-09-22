@@ -63,6 +63,61 @@ STEP_INSIDE_JIT_EXECUTOR = (
 )
 
 
+DUMP_NATIVE_FRAMES = (
+    "python exec(\"import gdb\\n"
+    "def kind(f):\\n"
+    "    try:\\n"
+    "        return 'inline' if f.type() == gdb.INLINE_FRAME else 'real'\\n"
+    "    except Exception as exc:\\n"
+    "        return 'kind-error ' + repr(exc)\\n"
+    "def lineinfo(f):\\n"
+    "    try:\\n"
+    "        return gdb.execute('info line *%#x' % f.pc(), to_string=True).strip()\\n"
+    "    except Exception as exc:\\n"
+    "        return 'line-error ' + repr(exc)\\n"
+    "f = gdb.newest_frame()\\n"
+    "n = 0\\n"
+    "while f is not None and n < 40:\\n"
+    "    print('DIAGFRAME', n, f.name(), hex(f.pc()), kind(f))\\n"
+    "    if n < 12:\\n"
+    "        print('DIAGLINE', n, lineinfo(f))\\n"
+    "    try:\\n"
+    "        f = f.older()\\n"
+    "    except Exception as exc:\\n"
+    "        print('DIAGFRAME unwind-error', repr(exc))\\n"
+    "        break\\n"
+    "    n += 1\\n\")"
+)
+
+
+FINISH_TO_JIT_EXECUTOR_DIAG = (
+    "python exec(\"import gdb\\n"
+    f"target = {JIT_EXECUTOR_FRAME!r}\\n"
+    "def kind(f):\\n"
+    "    try:\\n"
+    "        return 'inline' if f.type() == gdb.INLINE_FRAME else 'real'\\n"
+    "    except Exception as exc:\\n"
+    "        return 'kind-error ' + repr(exc)\\n"
+    f"for i in range({MAX_FINISH_STEPS}):\\n"
+    "    try:\\n"
+    "        frame = gdb.selected_frame()\\n"
+    "    except Exception as exc:\\n"
+    "        print('DIAGFINISH', i, 'NO-FRAME', repr(exc))\\n"
+    "        raise\\n"
+    "    if frame is not None and frame.name() == target:\\n"
+    "        print('DIAGFINISH', i, 'REACHED', target)\\n"
+    "        break\\n"
+    "    print('DIAGFINISH', i, frame.name(), hex(frame.pc()), kind(frame))\\n"
+    "    if i == 3:\\n"
+    "        print('DIAGFINISH enabling infrun debug')\\n"
+    "        gdb.execute('set debug infrun 1')\\n"
+    "    gdb.execute('finish')\\n"
+    "else:\\n"
+    "    raise RuntimeError('did not reach %s' % target)\\n\")"
+)
+
+
+
 def setUpModule():
     setup_module()
 
@@ -199,7 +254,9 @@ class JitBacktraceTests(DebuggerTests):
         gdb_output = self.get_stack_trace(
             script=JIT_SAMPLE_SCRIPT,
             cmds_after_breakpoint=[
-                FINISH_TO_JIT_EXECUTOR,
+                "maintenance info jit",
+                DUMP_NATIVE_FRAMES,
+                FINISH_TO_JIT_EXECUTOR_DIAG,
                 STEP_INSIDE_JIT_EXECUTOR,
                 "bt",
             ],
