@@ -2328,6 +2328,10 @@
             break;
         }
 
+        case _GUARD_BUILTINS_IS_CANONICAL: {
+            break;
+        }
+
         case _DELETE_FAST: {
             break;
         }
