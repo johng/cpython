@@ -40,13 +40,23 @@ BACKTRACE_FRAME_RE = re.compile(r"^#\d+\s+.*$", re.MULTILINE)
 FINISH_TO_JIT_EXECUTOR = (
     "python exec(\"import gdb\\n"
     f"target = {JIT_EXECUTOR_FRAME!r}\\n"
-    f"for _ in range({MAX_FINISH_STEPS}):\\n"
-    "    frame = gdb.selected_frame()\\n"
-    "    if frame is not None and frame.name() == target:\\n"
-    "        break\\n"
-    "    gdb.execute('finish')\\n"
-    "else:\\n"
-    "    raise RuntimeError('did not reach %s' % target)\\n\")"
+    # Walk the unwound stack rather than stepping out of frames one at a
+    # time: in an optimized build the frames between the breakpoint and the
+    # JIT frame are inlined or tail called, so 'finish' does not reliably
+    # stop once per frame, and a missed stop runs the inferior to exit.
+    "frame = gdb.newest_frame()\\n"
+    "while frame is not None and frame.name() != target:\\n"
+    "    frame = frame.older()\\n"
+    "if frame is None:\\n"
+    "    raise RuntimeError('did not reach %s' % target)\\n"
+    # Stop with the PC actually inside the executor, which is what the
+    # backtrace assertions below require.
+    "gdb.execute('tbreak *%#x' % frame.pc())\\n"
+    "gdb.execute('continue')\\n"
+    "frame = gdb.selected_frame()\\n"
+    "if frame is None or frame.name() != target:\\n"
+    "    raise RuntimeError('not stopped in %s: %r'\\n"
+    "                       % (target, frame and frame.name()))\\n\")"
 )
 STEP_INSIDE_JIT_EXECUTOR = (
     "python exec(\"import gdb\\n"
