@@ -8,6 +8,11 @@ on:
       - 'Python/executor_cases.c.h'
       - 'Python/optimizer_cases.c.h'
       - '**_testinternalcapi**'
+      # test_gdb.test_jit depends on the inliner's decisions for the helpers
+      # between its breakpoint and the JIT frame, so it is sensitive to these
+      # headers even though they are not JIT files.
+      - 'Include/internal/pycore_call.h'
+      - 'Include/internal/pycore_ceval.h'
       - '!Python/perf_jit_trampoline.c'
       - '!**/*.md'
       - '!**/*.ini'
