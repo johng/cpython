@@ -48,6 +48,8 @@ FINISH_TO_JIT_EXECUTOR = (
     "else:\\n"
     "    raise RuntimeError('did not reach %s' % target)\\n\")"
 )
+FINISH_TO_JIT_EXECUTOR_DEBUG = "source " + os.path.join(
+    os.path.dirname(__file__), "gdb_jit_finish_debug.py")
 STEP_INSIDE_JIT_EXECUTOR = (
     "python exec(\"import gdb\\n"
     f"target = {JIT_EXECUTOR_FRAME!r}\\n"
@@ -199,7 +201,8 @@ class JitBacktraceTests(DebuggerTests):
         gdb_output = self.get_stack_trace(
             script=JIT_SAMPLE_SCRIPT,
             cmds_after_breakpoint=[
-                FINISH_TO_JIT_EXECUTOR,
+                # DEBUG ONLY: instrumented copy of FINISH_TO_JIT_EXECUTOR.
+                FINISH_TO_JIT_EXECUTOR_DEBUG,
                 STEP_INSIDE_JIT_EXECUTOR,
                 "bt",
             ],
