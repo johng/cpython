@@ -63,6 +63,21 @@ STEP_INSIDE_JIT_EXECUTOR = (
 )
 
 
+DUMP_NATIVE_FRAMES = (
+    "python exec(\"import gdb\\n"
+    "f = gdb.newest_frame()\\n"
+    "n = 0\\n"
+    "while f is not None and n < 40:\\n"
+    "    print('DIAGFRAME', n, f.name(), hex(f.pc()))\\n"
+    "    try:\\n"
+    "        f = f.older()\\n"
+    "    except Exception as exc:\\n"
+    "        print('DIAGFRAME unwind-error', repr(exc))\\n"
+    "        break\\n"
+    "    n += 1\\n\")"
+)
+
+
 def setUpModule():
     setup_module()
 
@@ -199,6 +214,8 @@ class JitBacktraceTests(DebuggerTests):
         gdb_output = self.get_stack_trace(
             script=JIT_SAMPLE_SCRIPT,
             cmds_after_breakpoint=[
+                "maintenance info jit",
+                DUMP_NATIVE_FRAMES,
                 FINISH_TO_JIT_EXECUTOR,
                 STEP_INSIDE_JIT_EXECUTOR,
                 "bt",
