@@ -125,7 +125,7 @@ _PyVectorcall_FunctionInline(PyObject *callable)
 
    Return the result on success. Raise an exception and return NULL on
    error. */
-static inline PyObject *
+static inline Py_ALWAYS_INLINE PyObject *
 _PyObject_VectorcallTstate(PyThreadState *tstate, PyObject *callable,
                            PyObject *const *args, size_t nargsf,
                            PyObject *kwnames)

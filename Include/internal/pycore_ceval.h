@@ -114,7 +114,7 @@ extern void _PyPerfJit_WriteNamedCode(const void *code_addr,
                                       const char *filename);
 #endif
 
-static inline PyObject*
+static inline Py_ALWAYS_INLINE PyObject*
 _PyEval_EvalFrame(PyThreadState *tstate, _PyInterpreterFrame *frame, int throwflag)
 {
     EVAL_CALL_STAT_INC(EVAL_CALL_TOTAL);
