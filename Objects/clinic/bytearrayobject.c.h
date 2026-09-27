@@ -1569,9 +1569,7 @@ bytearray_decode(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyObje
         goto exit;
     }
 skip_optional_pos:
-    Py_BEGIN_CRITICAL_SECTION(self);
     return_value = bytearray_decode_impl((PyByteArrayObject *)self, encoding, errors);
-    Py_END_CRITICAL_SECTION();
 
 exit:
     return return_value;
@@ -1882,4 +1880,4 @@ bytearray_sizeof(PyObject *self, PyObject *Py_UNUSED(ignored))
 {
     return bytearray_sizeof_impl((PyByteArrayObject *)self);
 }
-/*[clinic end generated code: output=6dc315d35de3e670 input=a9049054013a1b77]*/
+/*[clinic end generated code: output=7d8375901255e408 input=a9049054013a1b77]*/

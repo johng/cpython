@@ -2777,7 +2777,10 @@ class FreeThreadingTest(unittest.TestCase):
 
         def decode(b, a):
             b.wait()
-            a.decode()
+            # The exported buffer is pinned for the whole decode, so a
+            # concurrent clear() either fails or happens entirely before it.
+            c = a.decode()
+            assert c == '' or c == '0' * 0x400000, len(c)
 
         def find(b, a):
             c = bytearray(b'0' * 0x40000)

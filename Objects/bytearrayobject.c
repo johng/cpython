@@ -2571,7 +2571,6 @@ bytearray_rstrip_impl(PyByteArrayObject *self, PyObject *bytes)
 }
 
 /*[clinic input]
-@critical_section
 bytearray.decode
 
     encoding: str(c_default="NULL") = 'utf-8'
@@ -2589,7 +2588,7 @@ Decode the bytearray using the codec registered for encoding.
 static PyObject *
 bytearray_decode_impl(PyByteArrayObject *self, const char *encoding,
                       const char *errors)
-/*[clinic end generated code: output=f57d43f4a00b42c5 input=e51ce9b82b51e2ca]*/
+/*[clinic end generated code: output=f57d43f4a00b42c5 input=f2f539b09781a267]*/
 {
     if (encoding == NULL)
         encoding = PyUnicode_GetDefaultEncoding();
