@@ -17,6 +17,37 @@ can be disabled by calling ``gc.disable()``.  To debug a leaking program call
 ``gc.DEBUG_SAVEALL``, causing garbage-collected objects to be saved in
 gc.garbage for inspection.
 
+.. _gc-free-threading:
+
+.. rubric:: Differences in the free-threaded build
+
+The :term:`free-threaded <free threading>` build uses a different collector
+from the default build.  It is not generational: every collection is
+stop-the-world and examines all objects tracked by the collector (apart from
+those moved to the permanent generation by :func:`freeze`), so the time a
+collection takes grows with the number of live objects.  In particular:
+
+* The *generation* argument of :func:`collect` is validated, but does not
+  restrict what is collected.  ``gc.collect(0)`` also collects unreachable
+  objects that would belong to an older generation in the default build.
+* The *generation* argument of :func:`get_objects` has no effect;
+  all tracked objects are returned.
+* Automatic collection starts once the number of allocations minus the number
+  of deallocations exceeds *threshold0* (see :func:`set_threshold`), but the
+  collector also waits until that number reaches a fraction of the number of
+  objects that survived the previous collection, so collections become less
+  frequent as the heap grows.  The statistics from :func:`get_stats` and the
+  *generation* reported to :data:`callbacks` for these collections are those of
+  generation ``0``.
+* The garbage collector is also responsible for freeing some objects whose
+  reference counts are deferred, and calling :func:`collect` merges per-thread
+  reference counts and releases memory held by deferred reclamation.  See
+  :ref:`freethreading-python-howto` for details.
+
+:func:`freeze` is particularly effective in the free-threaded build for
+programs with a large, long-lived heap, since frozen objects are skipped by
+every later collection.
+
 The :mod:`!gc` module provides the following functions:
 
 
